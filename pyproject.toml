@@ -1,0 +1,15 @@
+[tool.poetry]
+name = "slack-exporter"
+version = "0.1.0"
+description = ""
+authors = ["Naoyoshi Aikawa <n.aikawa91@gmail.com>"]
+readme = "README.md"
+packages = [{include = "slack_exporter"}]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
