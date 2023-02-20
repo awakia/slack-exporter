@@ -1,3 +1,6 @@
+## this bot needs permissions below:
+# channels:history,channels:join,channels:read
+
 import os
 import csv
 from dotenv import load_dotenv
@@ -56,6 +59,11 @@ def get_channel_history(channel_id, limit=100):
                 break
             oldest = messages[-1]["ts"]
         except SlackApiError as e:
+            if e.response["error"] == "not_in_channel":
+                # botはチャネルに入っていないとメッセージを取得できないので入る
+                response = client.conversations_join(channel=channel_id)
+                print("joined slack channel:", channel_id)
+                continue
             print("Error:", e)
             break
     return messages
