@@ -43,7 +43,7 @@ def get_channels():
     return channels
 
 # 発言一覧を取得する関数
-def get_channel_history(channel_id, limit=100):
+def get_channel_history(channel_id, limit=1000):
     client = WebClient(token=SLACK_BOT_TOKEN)
     messages = []
     oldest = 0
@@ -75,11 +75,39 @@ def write_csv(data, filename):
         for row in data:
             writer.writerow(row)
 
+
+## Message data sample
+# cf. https://api.slack.com/events/message#stars__pins__and_reactions
+"""
+{
+	"type": "message",
+	"channel": "C2147483705",
+	"user": "U2147483697",
+	"text": "Hello world",
+	"ts": "1355517523.000005",
+	"is_starred": true,
+	"pinned_to": ["C024BE7LT", ...],
+	"reactions": [
+		{
+			"name": "astonished",
+			"count": 3,
+			"users": [ "U1", "U2", "U3" ]
+		},
+		{
+			"name": "facepalm",
+			"count": 1034,
+			"users": [ "U1", "U2", "U3", "U4", "U5" ]
+		}
+	]
+}
+"""
+
 def main():
     load_token()
     # チャネルと発言の一覧を取得する
     channels = get_channels()
     messages = []
+    reactions = []
 
     for channel in channels:
         channel_id = channel["id"]
@@ -88,7 +116,13 @@ def main():
         for message in channel_history:
             text = message.get("text", "")
             ts = message.get("ts", "")
-            messages.append([channel_name, text, ts])
+            user = message.get("user", "")
+            messages.append([channel_id, channel_name, text, ts, user])
+
+            if "reactions" in message:
+                for reaction in message["reactions"]:
+                    users = ",".join(reaction.get("users", []))
+                    reactions.append([channel_id, ts, reaction["name"], reaction["count"], users])
 
     # CSVファイルに書き出す
     write_csv(messages, "slack_messages.csv")
