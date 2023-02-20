@@ -1,21 +1,26 @@
 import os
 import csv
+from dotenv import load_dotenv
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
 # 環境変数からSLACK_BOT_TOKENを取得する
-SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN")
+SLACK_BOT_TOKEN = None
 
-# SLACK_BOT_TOKENが設定されていない場合はエラーを出力して終了する
-if not SLACK_BOT_TOKEN:
-    print("SLACK_BOT_TOKENが設定されていません")
-    exit()
+def load_token():
+    load_dotenv()
+    # 環境変数からSLACK_BOT_TOKENを取得する
+    global SLACK_BOT_TOKEN
+    SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN")
 
-# Slack APIクライアントのインスタンス化
-client = WebClient(token=SLACK_BOT_TOKEN)
+    # SLACK_BOT_TOKENが設定されていない場合はエラーを出力して終了する
+    if not SLACK_BOT_TOKEN:
+        print("SLACK_BOT_TOKENが設定されていません")
+        exit()
 
 # チャネル一覧を取得する関数
 def get_channels():
+    client = WebClient(token=SLACK_BOT_TOKEN)
     channels = []
     cursor = None
     while True:
@@ -23,7 +28,7 @@ def get_channels():
             response = client.conversations_list(
                 limit=1000,
                 cursor=cursor,
-                types="public_channel,private_channel"
+                types="public_channel" # ",private_channel"
             )
             channels += response["channels"]
             cursor = response["response_metadata"].get("next_cursor")
@@ -36,6 +41,7 @@ def get_channels():
 
 # 発言一覧を取得する関数
 def get_channel_history(channel_id, limit=100):
+    client = WebClient(token=SLACK_BOT_TOKEN)
     messages = []
     oldest = 0
     while True:
@@ -61,18 +67,23 @@ def write_csv(data, filename):
         for row in data:
             writer.writerow(row)
 
-# チャネルと発言の一覧を取得する
-channels = get_channels()
-messages = []
+def main():
+    load_token()
+    # チャネルと発言の一覧を取得する
+    channels = get_channels()
+    messages = []
 
-for channel in channels:
-    channel_id = channel["id"]
-    channel_name = channel["name"]
-    channel_history = get_channel_history(channel_id)
-    for message in channel_history:
-        text = message.get("text", "")
-        ts = message.get("ts", "")
-        messages.append([channel_name, text, ts])
+    for channel in channels:
+        channel_id = channel["id"]
+        channel_name = channel["name"]
+        channel_history = get_channel_history(channel_id)
+        for message in channel_history:
+            text = message.get("text", "")
+            ts = message.get("ts", "")
+            messages.append([channel_name, text, ts])
 
-# CSVファイルに書き出す
-write_csv(messages, "slack_messages.csv")
+    # CSVファイルに書き出す
+    write_csv(messages, "slack_messages.csv")
+
+if __name__ == "__main__":
+    main()
