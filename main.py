@@ -22,8 +22,7 @@ def load_token():
         exit()
 
 # チャネル一覧を取得する関数
-def get_channels():
-    client = WebClient(token=SLACK_BOT_TOKEN)
+def get_channels(client):
     channels = []
     cursor = None
     while True:
@@ -43,8 +42,7 @@ def get_channels():
     return channels
 
 # 発言一覧を取得する関数
-def get_channel_history(channel_id, limit=1000):
-    client = WebClient(token=SLACK_BOT_TOKEN)
+def get_channel_history(client, channel_id, limit=1000):
     messages = []
     oldest = 0
     while True:
@@ -104,25 +102,50 @@ def write_csv(data, filename):
 
 def main():
     load_token()
+
+    client = WebClient(token=SLACK_BOT_TOKEN)
     # チャネルと発言の一覧を取得する
-    channels = get_channels()
+    channels = get_channels(client)
     messages = []
     reactions = []
+    replies = []
 
     for channel in channels:
         channel_id = channel["id"]
         channel_name = channel["name"]
-        channel_history = get_channel_history(channel_id)
+        channel_history = get_channel_history(client, channel_id)
         for message in channel_history:
-            text = message.get("text", "")
             ts = message.get("ts", "")
             user = message.get("user", "")
-            messages.append([channel_id, channel_name, text, ts, user])
+            text = message.get("text", "")
+            thread_ts = message.get("thread_ts", "")
+            reply_count = message.get("reply_count", 0)
+            messages.append([channel_id, channel_name, ts, user, text, thread_ts, reply_count])
 
             if "reactions" in message:
                 for reaction in message["reactions"]:
                     users = ",".join(reaction.get("users", []))
-                    reactions.append([channel_id, ts, reaction["name"], reaction["count"], users])
+                    reactions.append([channel_id, channel_name, ts, reaction["name"], reaction["count"], users])
+
+
+            # メッセージに対する返信を取得します
+            # TODO: pagination
+            if "thread_ts" in message:
+                thread_ts = message["thread_ts"]
+                try:
+                    # スレッド内のメッセージを取得します
+                    # cf. https://api.slack-gov.com/methods/conversations.replies
+                    response = client.conversations_replies(channel=channel_id, ts=thread_ts)
+                except SlackApiError as e:
+                    print(f"Error: {e}")
+                    continue
+
+                for reply in response["messages"]:
+                    ts = reply.get("ts", "")
+                    user = reply.get("user", "")
+                    text = reply.get("text", "")
+                    thread_ts = reply.get("thread_ts", "")
+                    replies.append([channel_id, channel_name, ts, user, text, thread_ts, ""])
 
     # CSVファイルに書き出す
     write_csv(messages, "slack_messages.csv")
