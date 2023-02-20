@@ -129,13 +129,14 @@ def main():
 
 
             # メッセージに対する返信を取得します
-            # TODO: pagination
             if "thread_ts" in message:
                 thread_ts = message["thread_ts"]
                 try:
                     # スレッド内のメッセージを取得します
                     # cf. https://api.slack-gov.com/methods/conversations.replies
-                    response = client.conversations_replies(channel=channel_id, ts=thread_ts)
+
+                    # NOTE: 本来はpaginationしないといけないが、1000を超えることはないと信じて手抜きする。
+                    response = client.conversations_replies(channel=channel_id, ts=thread_ts, limit=1000)
                 except SlackApiError as e:
                     print(f"Error: {e}")
                     continue
@@ -146,6 +147,11 @@ def main():
                     text = reply.get("text", "")
                     thread_ts = reply.get("thread_ts", "")
                     replies.append([channel_id, channel_name, ts, user, text, thread_ts, ""])
+
+                    if "reactions" in reply:
+                        for reaction in reply["reactions"]:
+                            users = ",".join(reaction.get("users", []))
+                            reactions.append([channel_id, channel_name, ts, reaction["name"], reaction["count"], users])
 
     # CSVファイルに書き出す
     write_csv(messages, "slack_messages.csv")
