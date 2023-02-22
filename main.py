@@ -106,9 +106,9 @@ def main():
     client = WebClient(token=SLACK_BOT_TOKEN)
     # チャネルと発言の一覧を取得する
     channels = get_channels(client)
-    messages = []
-    reactions = []
-    replies = []
+    messages = [["channel_id", "channel_name", "ts", "user", "text", "thread_ts", "reply_count"]]
+    reactions = [["channel_id", "channel_name", "ts", "user", "reaction_name", "reaction_count", "reaction_user"]]
+    replies = [["channel_id", "channel_name", "ts", "user", "text", "thread_ts", "reply_count"]]
 
     for channel in channels:
         channel_id = channel["id"]
@@ -124,9 +124,8 @@ def main():
 
             if "reactions" in message:
                 for reaction in message["reactions"]:
-                    users = ",".join(reaction.get("users", []))
-                    reactions.append([channel_id, channel_name, ts, reaction["name"], reaction["count"], users])
-
+                    for reaction_user in reaction.get("users", []):
+                        reactions.append([channel_id, channel_name, ts, user, reaction["name"], reaction["count"], reaction_user])
 
             # メッセージに対する返信を取得します
             if "thread_ts" in message:
@@ -155,6 +154,8 @@ def main():
 
     # CSVファイルに書き出す
     write_csv(messages, "slack_messages.csv")
+    write_csv(reactions, "slack_reactions.csv")
+    write_csv(replies, "slack_replies.csv")
 
 if __name__ == "__main__":
     main()
