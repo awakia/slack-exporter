@@ -3,6 +3,7 @@
 
 import os
 import csv
+import datetime
 from dotenv import load_dotenv
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
@@ -68,7 +69,7 @@ def get_channel_history(client, channel_id, limit=1000):
 
 # CSVファイルに書き出す関数
 def write_csv(data, filename):
-    with open(filename, mode="w", encoding="utf-8", newline="") as f:
+    with open(filename, mode="wa", encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
         for row in data:
             writer.writerow(row)
@@ -103,12 +104,25 @@ def write_csv(data, filename):
 def main():
     load_token()
 
+    t_delta = datetime.timedelta(hours=9)
+    jst = datetime.timezone(t_delta, 'JST')
+    now = datetime.datetime.now(jst)
+    timestr = now.strftime('%Y%m%d%H%M%S')
+
     client = WebClient(token=SLACK_BOT_TOKEN)
     # チャネルと発言の一覧を取得する
     channels = get_channels(client)
     messages = [["channel_id", "channel_name", "ts", "user", "text", "thread_ts", "reply_count"]]
     reactions = [["channel_id", "channel_name", "ts", "user", "reaction_name", "reaction_count", "reaction_user"]]
     replies = [["channel_id", "channel_name", "ts", "user", "text", "thread_ts", "reply_count"]]
+
+    # CSVファイルを用意
+    messages_csv = f"slack_messages_{timestr}.csv"
+    reactions_csv = f"slack_reactions_{timestr}.csv"
+    replies_csv = f"slack_replies_{timestr}.csv"
+    write_csv(messages, messages_csv)
+    write_csv(reactions, reactions_csv)
+    write_csv(replies, replies_csv)
 
     for channel in channels:
         is_archived = channel["is_archived"]
@@ -156,10 +170,13 @@ def main():
                             users = ",".join(reaction.get("users", []))
                             reactions.append([channel_id, channel_name, ts, reaction["name"], reaction["count"], users])
 
-    # CSVファイルに書き出す
-    write_csv(messages, "slack_messages.csv")
-    write_csv(reactions, "slack_reactions.csv")
-    write_csv(replies, "slack_replies.csv")
+        # csvに1チャネル文を書き出す
+        write_csv(messages, messages_csv)
+        write_csv(reactions, reactions_csv)
+        write_csv(replies, replies_csv)
+        messages = []
+        reactions = []
+        replies = []
 
 if __name__ == "__main__":
     main()
