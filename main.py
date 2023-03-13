@@ -3,6 +3,7 @@
 
 import os
 import csv
+import time
 import datetime
 from dotenv import load_dotenv
 from slack_sdk import WebClient
@@ -57,6 +58,7 @@ def get_channel_history(client, channel_id, limit=1000):
             if not response["has_more"]:
                 break
             oldest = messages[-1]["ts"]
+            time.sleep(1)  # レートリミットを考慮して1秒待機する
         except SlackApiError as e:
             if e.response["error"] == "not_in_channel":
                 # botはチャネルに入っていないとメッセージを取得できないので入る
@@ -154,6 +156,7 @@ def main():
 
                     # NOTE: 本来はpaginationしないといけないが、1000を超えることはないと信じて手抜きする。
                     response = client.conversations_replies(channel=channel_id, ts=thread_ts, limit=1000)
+                    time.sleep(1)  # レートリミットを考慮して1秒待機する
                 except SlackApiError as e:
                     print(f"Error: {e}")
                     continue
