@@ -111,9 +111,13 @@ def main():
     replies = [["channel_id", "channel_name", "ts", "user", "text", "thread_ts", "reply_count"]]
 
     for channel in channels:
+        is_archived = channel["is_archived"]
+        if is_archived:
+            continue
         channel_id = channel["id"]
         channel_name = channel["name"]
         channel_history = get_channel_history(client, channel_id)
+        print("processing", channel_id, channel_name)
         for message in channel_history:
             ts = message.get("ts", "")
             user = message.get("user", "")
