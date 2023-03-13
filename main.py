@@ -71,7 +71,7 @@ def get_channel_history(client, channel_id, limit=1000):
 
 # CSVファイルに書き出す関数
 def write_csv(data, filename):
-    with open(filename, mode="wa", encoding="utf-8", newline="") as f:
+    with open(filename, mode="a", encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
         for row in data:
             writer.writerow(row)
@@ -116,15 +116,12 @@ def main():
     channels = get_channels(client)
     messages = [["channel_id", "channel_name", "ts", "user", "text", "thread_ts", "reply_count"]]
     reactions = [["channel_id", "channel_name", "ts", "user", "reaction_name", "reaction_count", "reaction_user"]]
-    replies = [["channel_id", "channel_name", "ts", "user", "text", "thread_ts", "reply_count"]]
 
     # CSVファイルを用意
     messages_csv = f"slack_messages_{timestr}.csv"
     reactions_csv = f"slack_reactions_{timestr}.csv"
-    replies_csv = f"slack_replies_{timestr}.csv"
     write_csv(messages, messages_csv)
     write_csv(reactions, reactions_csv)
-    write_csv(replies, replies_csv)
 
     for channel in channels:
         is_archived = channel["is_archived"]
@@ -166,20 +163,18 @@ def main():
                     user = reply.get("user", "")
                     text = reply.get("text", "")
                     thread_ts = reply.get("thread_ts", "")
-                    replies.append([channel_id, channel_name, ts, user, text, thread_ts, ""])
+                    messages.append([channel_id, channel_name, ts, user, text, thread_ts, ""])
 
                     if "reactions" in reply:
                         for reaction in reply["reactions"]:
-                            users = ",".join(reaction.get("users", []))
-                            reactions.append([channel_id, channel_name, ts, reaction["name"], reaction["count"], users])
+                            for reaction_user in reaction.get("users", []):
+                                reactions.append([channel_id, channel_name, ts, user, reaction["name"], reaction["count"], reaction_user])
 
         # csvに1チャネル文を書き出す
         write_csv(messages, messages_csv)
         write_csv(reactions, reactions_csv)
-        write_csv(replies, replies_csv)
         messages = []
         reactions = []
-        replies = []
 
 if __name__ == "__main__":
     main()
