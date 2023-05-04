@@ -10,6 +10,27 @@ from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
 
+def write_csv(data, filename):
+    with open(filename, mode="a", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        for row in data:
+            writer.writerow(row)
+
+
+def process_message(message, channel_id, channel_name, messages, reactions):
+    ts = message.get("ts", "")
+    user = message.get("user", "")
+    text = message.get("text", "")
+    thread_ts = message.get("thread_ts", "")
+    reply_count = message.get("reply_count", 0)
+    messages.append([channel_id, channel_name, ts, user, text, thread_ts, reply_count])
+
+    if "reactions" in message:
+        for reaction in message["reactions"]:
+            for reaction_user in reaction.get("users", []):
+                reactions.append([channel_id, channel_name, ts, user, reaction["name"], reaction["count"], reaction_user])
+
+
 class SlackBot:
     def __init__(self):
         self.token = self.load_token()
@@ -70,13 +91,6 @@ class SlackBot:
                 break
         return messages
 
-    @staticmethod
-    def write_csv(data, filename):
-        with open(filename, mode="a", encoding="utf-8", newline="") as f:
-            writer = csv.writer(f)
-            for row in data:
-                writer.writerow(row)
-
     def run(self):
         t_delta = datetime.timedelta(hours=9)
         jst = datetime.timezone(t_delta, 'JST')
@@ -91,8 +105,8 @@ class SlackBot:
         # CSVファイルを用意
         messages_csv = f"slack_messages_{timestr}.csv"
         reactions_csv = f"slack_reactions_{timestr}.csv"
-        self.write_csv(messages, messages_csv)
-        self.write_csv(reactions, reactions_csv)
+        write_csv(messages, messages_csv)
+        write_csv(reactions, reactions_csv)
 
         for channel in channels:
             is_archived = channel["is_archived"]
@@ -103,44 +117,24 @@ class SlackBot:
             channel_history = self.get_channel_history(channel_id)
             print("processing", channel_id, channel_name)
             for message in channel_history:
-                ts = message.get("ts", "")
-                user = message.get("user", "")
-                text = message.get("text", "")
-                thread_ts = message.get("thread_ts", "")
-                reply_count = message.get("reply_count", 0)
-                messages.append([channel_id, channel_name, ts, user, text, thread_ts, reply_count])
+                process_message(message, channel_id, channel_name, messages, reactions)
 
-                if "reactions" in message:
-                    for reaction in message["reactions"]:
-                        for reaction_user in reaction.get("users", []):
-                            reactions.append([channel_id, channel_name, ts, user, reaction["name"], reaction["count"], reaction_user])
-
-                # メッセージに対する返信を取得します
+                # Retrieve message replies
                 if "thread_ts" in message:
                     thread_ts = message["thread_ts"]
                     try:
-                        # スレッド内のメッセージを取得します
                         response = self.client.conversations_replies(channel=channel_id, ts=thread_ts, limit=1000)
-                        time.sleep(1)  # レートリミットを考慮して1秒待機する
+                        time.sleep(1)  # consider rate limit and wait for 1 second
                     except SlackApiError as e:
                         print(f"Error: {e}")
                         continue
 
                     for reply in response["messages"]:
-                        ts = reply.get("ts", "")
-                        user = reply.get("user", "")
-                        text = reply.get("text", "")
-                        thread_ts = reply.get("thread_ts", "")
-                        messages.append([channel_id, channel_name, ts, user, text, thread_ts, ""])
+                        process_message(reply, channel_id, channel_name, messages, reactions)
 
-                        if "reactions" in reply:
-                            for reaction in reply["reactions"]:
-                                for reaction_user in reaction.get("users", []):
-                                    reactions.append([channel_id, channel_name, ts, user, reaction["name"], reaction["count"], reaction_user])
-
-            # csvに1チャネル文を書き出す
-            self.write_csv(messages, messages_csv)
-            self.write_csv(reactions, reactions_csv)
+            # Write channel data to CSV files
+            write_csv(messages, messages_csv)
+            write_csv(reactions, reactions_csv)
             messages = []
             reactions = []
 
