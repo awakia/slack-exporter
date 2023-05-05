@@ -181,7 +181,7 @@ if __name__ == "__main__":
     bot = SlackBot()
 
     start_time = datetime.datetime(2000, 1, 1)
-    start_time = datetime.datetime(2023, 5, 1)
+    # start_time = datetime.datetime(2023, 5, 1)
     end_time = datetime.datetime.now()
 
     bot.export_data_to_csv(start_time, end_time)
