@@ -5,11 +5,31 @@ import csv
 import datetime
 import os
 import time
-import pytz
+from dataclasses import dataclass
 
+import pytz
 from dotenv import load_dotenv
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
+
+
+@dataclass
+class Reaction:
+    name: str
+    count: int
+    users: list[str]
+
+
+@dataclass
+class Message:
+    channel_id: str
+    channel_name: str
+    ts: str
+    user: str
+    text: str
+    thread_ts: str
+    reply_count: int
+    reactions: list[Reaction]
 
 
 def write_csv(data, filename):
@@ -19,7 +39,7 @@ def write_csv(data, filename):
             writer.writerow(row)
 
 
-def write_channel_data(start_time, end_time, messages, reactions):
+def write_channel_data(start_time, end_time, message_data):
     jst = pytz.timezone('Asia/Tokyo')
     start = jst.localize(start_time)
     end = jst.localize(end_time)
@@ -27,23 +47,34 @@ def write_channel_data(start_time, end_time, messages, reactions):
     messages_csv = f"slack_messages_{timestr}.csv"
     reactions_csv = f"slack_reactions_{timestr}.csv"
 
+    messages = [["channel_id", "channel_name", "ts", "user", "text", "thread_ts", "reply_count"]]
+    reactions = [["channel_id", "channel_name", "ts", "user", "reaction_name", "reaction_count", "reaction_user"]]
+
+    for _, m in message_data.items():
+        messages.append([m.channel_id, m.channel_name, m.ts, m.user, m.text, m.thread_ts, m.reply_count])
+        for r in m.reactions:
+            for u in r.users:
+                reactions.append([m.channel_id, m.channel_name, m.ts, m.user, r.name, r.count, u])
+
     write_csv(messages, messages_csv)
     write_csv(reactions, reactions_csv)
 
 
-def process_message(message, channel_id, channel_name, messages, reactions):
+def process_message(message, channel_id, channel_name, message_data):
     ts = message.get("ts", "")
     user = message.get("user", "")
     text = message.get("text", "")
     thread_ts = message.get("thread_ts", "")
     reply_count = message.get("reply_count", 0)
-    messages.append([channel_id, channel_name, ts, user, text, thread_ts, reply_count])
 
+    reactions = []
     if "reactions" in message:
         for reaction in message["reactions"]:
-            for reaction_user in reaction.get("users", []):
-                data = [channel_id, channel_name, ts, user, reaction["name"], reaction["count"], reaction_user]
-                reactions.append(data)
+            reaction_users = reaction.get("users", [])
+            reactions.append(Reaction(reaction["name"], reaction["count"], reaction_users))
+
+    message_data[(channel_id, ts)] = Message(
+        channel_id, channel_name, ts, user, text, thread_ts, reply_count, reactions)
 
 
 class SlackBot:
@@ -106,14 +137,14 @@ class SlackBot:
                 break
         return messages
 
-    def process_channel(self, channel, oldest, latest, messages, reactions, ):
+    def process_channel(self, channel, oldest, latest, message_data):
         channel_id = channel["id"]
         channel_name = channel["name"]
         channel_history = self.get_channel_history(channel_id, oldest, latest)
         print("processing", channel_id, channel_name)
 
         for message in channel_history:
-            process_message(message, channel_id, channel_name, messages, reactions)
+            process_message(message, channel_id, channel_name, message_data)
 
             if "thread_ts" in message:
                 thread_ts = message["thread_ts"]
@@ -128,27 +159,26 @@ class SlackBot:
                 for reply in response["messages"]:
                     if reply.get("ts") == thread_ts:
                         continue
-                    process_message(reply, channel_id, channel_name, messages, reactions)
+                    process_message(reply, channel_id, channel_name, message_data)
 
     def create_messages_and_reactions(self, start_time, end_time):
         start_timestamp = time.mktime(start_time.timetuple())
         end_timestamp = time.mktime(end_time.timetuple())
 
         channels = self.get_channels()
-        messages = [["channel_id", "channel_name", "ts", "user", "text", "thread_ts", "reply_count"]]
-        reactions = [["channel_id", "channel_name", "ts", "user", "reaction_name", "reaction_count", "reaction_user"]]
+        message_data = {}
 
         for channel in channels:
             is_archived = channel["is_archived"]
             if is_archived:
                 continue
-            self.process_channel(channel, start_timestamp, end_timestamp, messages, reactions)
+            self.process_channel(channel, start_timestamp, end_timestamp, message_data)
 
-        return messages, reactions
+        return message_data
 
     def export_data_to_csv(self, start_time, end_time):
-        messages, reactions = self.create_messages_and_reactions(start_time, end_time)
-        write_channel_data(start_time, end_time, messages, reactions)
+        message_data = self.create_messages_and_reactions(start_time, end_time)
+        write_channel_data(start_time, end_time, message_data)
 
 
 # Message data sample
@@ -181,7 +211,7 @@ if __name__ == "__main__":
     bot = SlackBot()
 
     start_time = datetime.datetime(2000, 1, 1)
-    # start_time = datetime.datetime(2023, 5, 1)
+    start_time = datetime.datetime(2023, 5, 1)
     end_time = datetime.datetime.now()
 
     bot.export_data_to_csv(start_time, end_time)
