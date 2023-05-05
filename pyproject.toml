@@ -10,6 +10,7 @@ packages = [{include = "slack_exporter"}]
 python = "^3.11"
 python-dotenv = "^0.21.1"
 slack-bolt = "^1.16.2"
+pytz = "^2023.3"
 
 
 [tool.poetry.group.dev.dependencies]

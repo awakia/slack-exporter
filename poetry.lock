@@ -260,6 +260,18 @@ files = [
 cli = ["click (>=5.0)"]
 
 [[package]]
+name = "pytz"
+version = "2023.3"
+description = "World timezone definitions, modern and historical"
+category = "main"
+optional = false
+python-versions = "*"
+files = [
+    {file = "pytz-2023.3-py2.py3-none-any.whl", hash = "sha256:a151b3abb88eda1d4e34a9814df37de2a80e301e68ba0fd856fb9b46bfbbbffb"},
+    {file = "pytz-2023.3.tar.gz", hash = "sha256:1d8ce29db189191fb55338ee6d0387d82ab59f3d00eac103412d64e0ebd0c588"},
+]
+
+[[package]]
 name = "slack-bolt"
 version = "1.16.2"
 description = "The Bolt Framework for Python"
@@ -312,4 +324,4 @@ files = [
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.11"
-content-hash = "00feeb58291d0dca4cc8630ff7f4b75a118dac490bf20067f6127c921124f5a1"
+content-hash = "65c023bbee49e4314215c4a5c1dd1fc6f0f0fe5b9a35ae65b21600e86aa22fe2"

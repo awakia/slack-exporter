@@ -5,6 +5,7 @@ import csv
 import datetime
 import os
 import time
+import pytz
 
 from dotenv import load_dotenv
 from slack_sdk import WebClient
@@ -19,8 +20,7 @@ def write_csv(data, filename):
 
 
 def write_channel_data(start_time, end_time, messages, reactions):
-    t_delta = datetime.timedelta(hours=9)
-    jst = datetime.timezone(t_delta, 'JST')
+    jst = pytz.timezone('Asia/Tokyo')
     start = jst.localize(start_time)
     end = jst.localize(end_time)
     timestr = start.strftime('%Y%m%d%H%M%S') + '-' + end.strftime('%Y%m%d%H%M%S')
@@ -181,7 +181,7 @@ if __name__ == "__main__":
     bot = SlackBot()
 
     start_time = datetime.datetime(2000, 1, 1)
-    # start_time = datetime.datetime(2023, 5, 1)
+    start_time = datetime.datetime(2023, 5, 1)
     end_time = datetime.datetime.now()
 
     bot.export_data_to_csv(start_time, end_time)
