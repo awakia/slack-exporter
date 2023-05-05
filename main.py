@@ -1,10 +1,11 @@
 # this bot needs permissions below:
 # channels:history,channels:join,channels:read
 
-import os
 import csv
-import time
 import datetime
+import os
+import time
+
 from dotenv import load_dotenv
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
@@ -15,6 +16,18 @@ def write_csv(data, filename):
         writer = csv.writer(f)
         for row in data:
             writer.writerow(row)
+
+
+def write_channel_data(messages, reactions):
+    t_delta = datetime.timedelta(hours=9)
+    jst = datetime.timezone(t_delta, 'JST')
+    now = datetime.datetime.now(jst)
+    timestr = now.strftime('%Y%m%d%H%M%S')
+    messages_csv = f"slack_messages_{timestr}.csv"
+    reactions_csv = f"slack_reactions_{timestr}.csv"
+
+    write_csv(messages, messages_csv)
+    write_csv(reactions, reactions_csv)
 
 
 def process_message(message, channel_id, channel_name, messages, reactions):
@@ -113,17 +126,6 @@ class SlackBot:
                 for reply in response["messages"]:
                     process_message(reply, channel_id, channel_name, messages, reactions)
 
-    def write_channel_data(self, messages, reactions):
-        t_delta = datetime.timedelta(hours=9)
-        jst = datetime.timezone(t_delta, 'JST')
-        now = datetime.datetime.now(jst)
-        timestr = now.strftime('%Y%m%d%H%M%S')
-        messages_csv = f"slack_messages_{timestr}.csv"
-        reactions_csv = f"slack_reactions_{timestr}.csv"
-
-        write_csv(messages, messages_csv)
-        write_csv(reactions, reactions_csv)
-
     def create_messages_and_reactions(self):
         channels = self.get_channels()
         messages = [["channel_id", "channel_name", "ts", "user", "text", "thread_ts", "reply_count"]]
@@ -139,8 +141,34 @@ class SlackBot:
 
     def export_data_to_csv(self):
         messages, reactions = self.create_messages_and_reactions()
-        self.write_channel_data(messages, reactions)
+        write_channel_data(messages, reactions)
 
+
+# Message data sample
+# cf. https://api.slack.com/events/message#stars__pins__and_reactions
+"""
+{
+       "type": "message",
+       "channel": "C2147483705",
+       "user": "U2147483697",
+       "text": "Hello world",
+       "ts": "1355517523.000005",
+       "is_starred": true,
+       "pinned_to": ["C024BE7LT", ...],
+       "reactions": [
+               {
+                       "name": "astonished",
+                       "count": 3,
+                       "users": [ "U1", "U2", "U3" ]
+               },
+               {
+                       "name": "facepalm",
+                       "count": 5,
+                       "users": [ "U1", "U2", "U3", "U4", "U5" ]
+               }
+       ]
+}
+"""
 
 if __name__ == "__main__":
     bot = SlackBot()
