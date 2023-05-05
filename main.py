@@ -124,6 +124,8 @@ class SlackBot:
                     continue
 
                 for reply in response["messages"]:
+                    if reply.get("ts") == thread_ts:
+                        continue
                     process_message(reply, channel_id, channel_name, messages, reactions)
 
     def create_messages_and_reactions(self):
