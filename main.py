@@ -91,54 +91,61 @@ class SlackBot:
                 break
         return messages
 
-    def run(self):
+    def prepare_csv_files(self):
         t_delta = datetime.timedelta(hours=9)
         jst = datetime.timezone(t_delta, 'JST')
         now = datetime.datetime.now(jst)
         timestr = now.strftime('%Y%m%d%H%M%S')
+        messages_csv = f"slack_messages_{timestr}.csv"
+        reactions_csv = f"slack_reactions_{timestr}.csv"
+        return messages_csv, reactions_csv
 
-        # チャネルと発言の一覧を取得する
+
+    def process_channel(self, channel, messages, reactions):
+        channel_id = channel["id"]
+        channel_name = channel["name"]
+        channel_history = self.get_channel_history(channel_id)
+        print("processing", channel_id, channel_name)
+
+        for message in channel_history:
+            process_message(message, channel_id, channel_name, messages, reactions)
+
+            if "thread_ts" in message:
+                thread_ts = message["thread_ts"]
+                try:
+                    response = bot.client.conversations_replies(channel=channel_id, ts=thread_ts, limit=1000)
+                    time.sleep(1)
+                except SlackApiError as e:
+                    print(f"Error: {e}")
+                    continue
+
+                for reply in response["messages"]:
+                    process_message(reply, channel_id, channel_name, messages, reactions)
+
+
+    def write_channel_data(self, messages, reactions, messages_csv, reactions_csv):
+        write_csv(messages, messages_csv)
+        write_csv(reactions, reactions_csv)
+
+    def create_messages_and_reactions(self):
         channels = self.get_channels()
         messages = [["channel_id", "channel_name", "ts", "user", "text", "thread_ts", "reply_count"]]
         reactions = [["channel_id", "channel_name", "ts", "user", "reaction_name", "reaction_count", "reaction_user"]]
-
-        # CSVファイルを用意
-        messages_csv = f"slack_messages_{timestr}.csv"
-        reactions_csv = f"slack_reactions_{timestr}.csv"
-        write_csv(messages, messages_csv)
-        write_csv(reactions, reactions_csv)
 
         for channel in channels:
             is_archived = channel["is_archived"]
             if is_archived:
                 continue
-            channel_id = channel["id"]
-            channel_name = channel["name"]
-            channel_history = self.get_channel_history(channel_id)
-            print("processing", channel_id, channel_name)
-            for message in channel_history:
-                process_message(message, channel_id, channel_name, messages, reactions)
+            self.process_channel(channel, messages, reactions)
 
-                # Retrieve message replies
-                if "thread_ts" in message:
-                    thread_ts = message["thread_ts"]
-                    try:
-                        response = self.client.conversations_replies(channel=channel_id, ts=thread_ts, limit=1000)
-                        time.sleep(1)  # consider rate limit and wait for 1 second
-                    except SlackApiError as e:
-                        print(f"Error: {e}")
-                        continue
+        return messages, reactions
 
-                    for reply in response["messages"]:
-                        process_message(reply, channel_id, channel_name, messages, reactions)
-
-            # Write channel data to CSV files
-            write_csv(messages, messages_csv)
-            write_csv(reactions, reactions_csv)
-            messages = []
-            reactions = []
+    def export_data_to_csv(self):
+        messages, reactions = self.create_messages_and_reactions()
+        messages_csv, reactions_csv = self.prepare_csv_files()
+        self.write_channel_data(messages, reactions, messages_csv, reactions_csv)
 
 
 if __name__ == "__main__":
     bot = SlackBot()
-    bot.run()
+    bot.export_data_to_csv()
