@@ -12,6 +12,11 @@ python-dotenv = "^0.21.1"
 slack-bolt = "^1.16.2"
 
 
+[tool.poetry.group.dev.dependencies]
+flake8 = "^6.0.0"
+mypy = "^1.2.0"
+black = "^23.3.0"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
