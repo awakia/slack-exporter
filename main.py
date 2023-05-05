@@ -1,4 +1,4 @@
-## this bot needs permissions below:
+# this bot needs permissions below:
 # channels:history,channels:join,channels:read
 
 import os
@@ -28,7 +28,8 @@ def process_message(message, channel_id, channel_name, messages, reactions):
     if "reactions" in message:
         for reaction in message["reactions"]:
             for reaction_user in reaction.get("users", []):
-                reactions.append([channel_id, channel_name, ts, user, reaction["name"], reaction["count"], reaction_user])
+                data = [channel_id, channel_name, ts, user, reaction["name"], reaction["count"], reaction_user]
+                reactions.append(data)
 
 
 class SlackBot:
@@ -100,7 +101,6 @@ class SlackBot:
         reactions_csv = f"slack_reactions_{timestr}.csv"
         return messages_csv, reactions_csv
 
-
     def process_channel(self, channel, messages, reactions):
         channel_id = channel["id"]
         channel_name = channel["name"]
@@ -121,7 +121,6 @@ class SlackBot:
 
                 for reply in response["messages"]:
                     process_message(reply, channel_id, channel_name, messages, reactions)
-
 
     def write_channel_data(self, messages, reactions, messages_csv, reactions_csv):
         write_csv(messages, messages_csv)
