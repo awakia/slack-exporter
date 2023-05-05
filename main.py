@@ -92,15 +92,6 @@ class SlackBot:
                 break
         return messages
 
-    def prepare_csv_files(self):
-        t_delta = datetime.timedelta(hours=9)
-        jst = datetime.timezone(t_delta, 'JST')
-        now = datetime.datetime.now(jst)
-        timestr = now.strftime('%Y%m%d%H%M%S')
-        messages_csv = f"slack_messages_{timestr}.csv"
-        reactions_csv = f"slack_reactions_{timestr}.csv"
-        return messages_csv, reactions_csv
-
     def process_channel(self, channel, messages, reactions):
         channel_id = channel["id"]
         channel_name = channel["name"]
@@ -122,7 +113,14 @@ class SlackBot:
                 for reply in response["messages"]:
                     process_message(reply, channel_id, channel_name, messages, reactions)
 
-    def write_channel_data(self, messages, reactions, messages_csv, reactions_csv):
+    def write_channel_data(self, messages, reactions):
+        t_delta = datetime.timedelta(hours=9)
+        jst = datetime.timezone(t_delta, 'JST')
+        now = datetime.datetime.now(jst)
+        timestr = now.strftime('%Y%m%d%H%M%S')
+        messages_csv = f"slack_messages_{timestr}.csv"
+        reactions_csv = f"slack_reactions_{timestr}.csv"
+
         write_csv(messages, messages_csv)
         write_csv(reactions, reactions_csv)
 
@@ -141,8 +139,7 @@ class SlackBot:
 
     def export_data_to_csv(self):
         messages, reactions = self.create_messages_and_reactions()
-        messages_csv, reactions_csv = self.prepare_csv_files()
-        self.write_channel_data(messages, reactions, messages_csv, reactions_csv)
+        self.write_channel_data(messages, reactions)
 
 
 if __name__ == "__main__":
