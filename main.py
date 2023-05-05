@@ -18,11 +18,12 @@ def write_csv(data, filename):
             writer.writerow(row)
 
 
-def write_channel_data(messages, reactions):
+def write_channel_data(start_time, end_time, messages, reactions):
     t_delta = datetime.timedelta(hours=9)
     jst = datetime.timezone(t_delta, 'JST')
-    now = datetime.datetime.now(jst)
-    timestr = now.strftime('%Y%m%d%H%M%S')
+    start = jst.localize(start_time)
+    end = jst.localize(end_time)
+    timestr = start.strftime('%Y%m%d%H%M%S') + '-' + end.strftime('%Y%m%d%H%M%S')
     messages_csv = f"slack_messages_{timestr}.csv"
     reactions_csv = f"slack_reactions_{timestr}.csv"
 
@@ -80,15 +81,15 @@ class SlackBot:
                 break
         return channels
 
-    def get_channel_history(self, channel_id, limit=1000):
+    def get_channel_history(self, channel_id, oldest, latest, limit=1000):
         messages = []
-        oldest = 0
         while True:
             try:
                 response = self.client.conversations_history(
                     channel=channel_id,
-                    limit=limit,
-                    oldest=oldest
+                    oldest=oldest,
+                    latest=latest,
+                    limit=limit
                 )
                 messages += response["messages"]
                 if not response["has_more"]:
@@ -105,10 +106,10 @@ class SlackBot:
                 break
         return messages
 
-    def process_channel(self, channel, messages, reactions):
+    def process_channel(self, channel, oldest, latest, messages, reactions, ):
         channel_id = channel["id"]
         channel_name = channel["name"]
-        channel_history = self.get_channel_history(channel_id)
+        channel_history = self.get_channel_history(channel_id, oldest, latest)
         print("processing", channel_id, channel_name)
 
         for message in channel_history:
@@ -117,7 +118,8 @@ class SlackBot:
             if "thread_ts" in message:
                 thread_ts = message["thread_ts"]
                 try:
-                    response = bot.client.conversations_replies(channel=channel_id, ts=thread_ts, limit=1000)
+                    response = bot.client.conversations_replies(
+                        channel=channel_id, ts=thread_ts, oldest=oldest, latest=latest, limit=1000)
                     time.sleep(1)
                 except SlackApiError as e:
                     print(f"Error: {e}")
@@ -128,7 +130,10 @@ class SlackBot:
                         continue
                     process_message(reply, channel_id, channel_name, messages, reactions)
 
-    def create_messages_and_reactions(self):
+    def create_messages_and_reactions(self, start_time, end_time):
+        start_timestamp = time.mktime(start_time.timetuple())
+        end_timestamp = time.mktime(end_time.timetuple())
+
         channels = self.get_channels()
         messages = [["channel_id", "channel_name", "ts", "user", "text", "thread_ts", "reply_count"]]
         reactions = [["channel_id", "channel_name", "ts", "user", "reaction_name", "reaction_count", "reaction_user"]]
@@ -137,13 +142,13 @@ class SlackBot:
             is_archived = channel["is_archived"]
             if is_archived:
                 continue
-            self.process_channel(channel, messages, reactions)
+            self.process_channel(channel, start_timestamp, end_timestamp, messages, reactions)
 
         return messages, reactions
 
-    def export_data_to_csv(self):
-        messages, reactions = self.create_messages_and_reactions()
-        write_channel_data(messages, reactions)
+    def export_data_to_csv(self, start_time, end_time):
+        messages, reactions = self.create_messages_and_reactions(start_time, end_time)
+        write_channel_data(start_time, end_time, messages, reactions)
 
 
 # Message data sample
@@ -174,4 +179,9 @@ class SlackBot:
 
 if __name__ == "__main__":
     bot = SlackBot()
-    bot.export_data_to_csv()
+
+    start_time = datetime.datetime(2000, 1, 1)
+    # start_time = datetime.datetime(2023, 5, 1)
+    end_time = datetime.datetime.now()
+
+    bot.export_data_to_csv(start_time, end_time)
