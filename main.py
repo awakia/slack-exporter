@@ -5,9 +5,11 @@ import csv
 import datetime
 import os
 import time
-from dataclasses import dataclass
+from typing import Optional
+import psycopg2
+from psycopg2 import extras
+from dataclasses import dataclass, field
 
-import pytz
 from dotenv import load_dotenv
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
@@ -24,31 +26,17 @@ class Reaction:
 class Message:
     channel_id: str
     channel_name: str
-    ts: str
+    ts: datetime.datetime
     user: str
     text: str
-    thread_ts: str
-    reply_count: int
-    reactions: list[Reaction]
+    thread_ts: Optional[datetime.datetime] = None
+    reply_count: int = 0
+    reactions: list[Reaction] = field(default_factory=list)
 
 
-def write_csv(data, filename):
-    with open(filename, mode="a", encoding="utf-8", newline="") as f:
-        writer = csv.writer(f)
-        for row in data:
-            writer.writerow(row)
-
-
-def write_channel_data(start_time, end_time, message_data):
-    jst = pytz.timezone('Asia/Tokyo')
-    start = jst.localize(start_time)
-    end = jst.localize(end_time)
-    timestr = start.strftime('%Y%m%d%H%M%S') + '-' + end.strftime('%Y%m%d%H%M%S')
-    messages_csv = f"slack_messages_{timestr}.csv"
-    reactions_csv = f"slack_reactions_{timestr}.csv"
-
-    messages = [["channel_id", "channel_name", "ts", "user", "text", "thread_ts", "reply_count"]]
-    reactions = [["channel_id", "channel_name", "ts", "user", "reaction_name", "reaction_count", "reaction_user"]]
+def write_channel_data(message_data):
+    messages = []
+    reactions = []
 
     for _, m in message_data.items():
         messages.append([m.channel_id, m.channel_name, m.ts, m.user, m.text, m.thread_ts, m.reply_count])
@@ -56,15 +44,20 @@ def write_channel_data(start_time, end_time, message_data):
             for u in r.users:
                 reactions.append([m.channel_id, m.channel_name, m.ts, m.user, r.name, r.count, u])
 
-    write_csv(messages, messages_csv)
-    write_csv(reactions, reactions_csv)
-
+    db = Db()
+    db.insert_message_data(messages)
+    db.insert_reaction_data(reactions)
 
 def process_message(message, channel_id, channel_name, message_data):
-    ts = message.get("ts", "")
+    ts = datetime.datetime.fromtimestamp(float(message.get("ts", "")))
     user = message.get("user", "")
     text = message.get("text", "")
     thread_ts = message.get("thread_ts", "")
+    # スレッドがない場合、thread_tsをNULLで登録する
+    if thread_ts == "":
+        thread_ts = None
+    else:
+        thread_ts = datetime.datetime.fromtimestamp(float(thread_ts))
     reply_count = message.get("reply_count", 0)
 
     reactions = []
@@ -73,9 +66,82 @@ def process_message(message, channel_id, channel_name, message_data):
             reaction_users = reaction.get("users", [])
             reactions.append(Reaction(reaction["name"], reaction["count"], reaction_users))
 
-    message_data[(channel_id, ts)] = Message(
-        channel_id, channel_name, ts, user, text, thread_ts, reply_count, reactions)
+    key = (channel_id, ts)
+    if key not in message_data:
+        message_data[key] = Message(channel_id, channel_name, ts, user, text, thread_ts, reply_count, reactions)
 
+class Db:
+    def __init__(self):
+        try:
+            self.conn = psycopg2.connect(
+                host=os.environ.get("DB_HOST"),
+                port=os.environ.get("DB_PORT"),
+                dbname=os.environ.get("DB_NAME"),
+                user=os.environ.get("DB_USER"),
+                password=os.environ.get("DB_PASS"),
+                sslmode='require'
+            )
+        except psycopg2.Error as e:
+            print(f"Failed to connect to database: {e}")
+            raise e
+        else:
+            with self.conn.cursor() as cursor:
+                cursor.execute("set local timezone to 'Asia/Tokyo';")
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS slack_messages (
+                        channel_id VARCHAR(20) NOT NULL,
+                        channel_name VARCHAR(20) NOT NULL,
+                        ts TIMESTAMP NOT NULL,
+                        user_id VARCHAR(20) NOT NULL,
+                        text VARCHAR,
+                        thread_ts TIMESTAMP,
+                        reply_count INTEGER,
+                        PRIMARY KEY(channel_id, ts, user_id, text)
+                    );
+                """)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS slack_reactions (
+                        channel_id VARCHAR(20) NOT NULL,
+                        channel_name VARCHAR(20) NOT NULL,
+                        ts TIMESTAMP NOT NULL,
+                        user_id VARCHAR(20) NOT NULL,
+                        reaction_name VARCHAR(20) NOT NULL,
+                        reaction_count INTEGER,
+                        reaction_user VARCHAR(20),
+                        PRIMARY KEY(channel_id, ts, reaction_name, reaction_user)
+                    );
+                """)
+                self.conn.commit()
+
+    def insert_message_data(self, messages):
+        if len(messages) == 0 :
+            print("Skip registration because reactions have no data.")
+            return
+
+        try:
+            with self.conn.cursor() as cursor:
+                query = f"INSERT INTO slack_messages (channel_id, channel_name, ts, user_id, text, thread_ts, reply_count) VALUES %s ON CONFLICT DO NOTHING;"
+                extras.execute_values(cursor, query, messages)
+                self.conn.commit()
+        except psycopg2.Error as e:
+            print(f"Failed to insert data: {e}")
+            self.conn.rollback()
+            raise e
+
+    def insert_reaction_data(self, reactions):
+        if len(reactions) == 0 :
+            print("Skip registration because reactions have no data.")
+            return
+
+        try:
+            with self.conn.cursor() as cursor:
+                query = f"INSERT INTO slack_reactions (channel_id, channel_name, ts, user_id, reaction_name, reaction_count, reaction_user) VALUES %s ON CONFLICT DO NOTHING;;"
+                extras.execute_values(cursor, query, reactions)
+                self.conn.commit()
+        except psycopg2.Error as e:
+            print(f"Failed to insert data: {e}")
+            self.conn.rollback()
+            raise e
 
 class SlackBot:
     def __init__(self):
@@ -178,7 +244,7 @@ class SlackBot:
 
     def export_data_to_csv(self, start_time, end_time):
         message_data = self.create_messages_and_reactions(start_time, end_time)
-        write_channel_data(start_time, end_time, message_data)
+        write_channel_data(message_data)
 
 
 # Message data sample
