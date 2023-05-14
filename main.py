@@ -242,7 +242,7 @@ class SlackBot:
 
         return message_data
 
-    def export_data_to_csv(self, start_time, end_time):
+    def export_data_worker(self, start_time, end_time):
         message_data = self.create_messages_and_reactions(start_time, end_time)
         write_channel_data(message_data)
 
@@ -280,4 +280,4 @@ if __name__ == "__main__":
     # start_time = datetime.datetime(2023, 5, 1)
     end_time = datetime.datetime.now()
 
-    bot.export_data_to_csv(start_time, end_time)
+    bot.export_data_worker(start_time, end_time)
