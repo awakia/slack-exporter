@@ -135,7 +135,7 @@ class Db:
 
         try:
             with self.conn.cursor() as cursor:
-                query = f"INSERT INTO slack_reactions (channel_id, channel_name, ts, user_id, reaction_name, reaction_count, reaction_user) VALUES %s ON CONFLICT DO NOTHING;;"
+                query = f"INSERT INTO slack_reactions (channel_id, channel_name, ts, user_id, reaction_name, reaction_count, reaction_user) VALUES %s ON CONFLICT DO NOTHING;"
                 extras.execute_values(cursor, query, reactions)
                 self.conn.commit()
         except psycopg2.Error as e:
