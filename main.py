@@ -35,6 +35,11 @@ class Message:
     reply_count: int = 0
     reactions: list[Reaction] = field(default_factory=list)
 
+@dataclass
+class Channel:
+    channel_id: str
+    channel_name: str
+
 def write_csv(data, filename):
     with open(filename, mode="a", encoding="utf-8", newline="") as f:
         writer = csv.writer(f)
@@ -62,17 +67,20 @@ def write_channel_data_for_csv(start_time, end_time, message_data):
     write_csv(messages, messages_csv)
     write_csv(reactions, reactions_csv)
 
-def write_channel_data_for_database(message_data):
+def write_channel_data_for_database(message_data, channel_list):
     messages = []
     reactions = []
 
     for _, m in message_data.items():
-        messages.append([m.channel_id, m.channel_name, m.ts, m.user, m.text, m.thread_ts, m.reply_count])
+        messages.append([m.channel_id, m.ts, m.user, m.text, m.thread_ts, m.reply_count])
         for r in m.reactions:
             for u in r.users:
-                reactions.append([m.channel_id, m.channel_name, m.ts, m.user, r.name, r.count, u])
+                reactions.append([m.channel_id, m.ts, m.user, r.name, r.count, u])
+
+    channels = [[channel.channel_id, channel.channel_name] for channel in channel_list]
 
     db = Db()
+    db.insert_channel_data(channels)
     db.insert_message_data(messages)
     db.insert_reaction_data(reactions)
 
@@ -101,14 +109,7 @@ def process_message(message, channel_id, channel_name, message_data):
 class Db:
     def __init__(self):
         try:
-            self.conn = psycopg2.connect(
-                host=os.environ.get("DB_HOST"),
-                port=os.environ.get("DB_PORT"),
-                dbname=os.environ.get("DB_NAME"),
-                user=os.environ.get("DB_USER"),
-                password=os.environ.get("DB_PASS"),
-                sslmode='require'
-            )
+            self.conn = psycopg2.connect(os.environ.get("DATABASE_URL"))
         except psycopg2.Error as e:
             print(f"Failed to connect to database: {e}")
             raise e
@@ -118,7 +119,6 @@ class Db:
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS slack_messages (
                         channel_id VARCHAR(20) NOT NULL,
-                        channel_name VARCHAR(20) NOT NULL,
                         ts TIMESTAMP NOT NULL,
                         user_id VARCHAR(20) NOT NULL,
                         text VARCHAR,
@@ -130,13 +130,19 @@ class Db:
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS slack_reactions (
                         channel_id VARCHAR(20) NOT NULL,
-                        channel_name VARCHAR(20) NOT NULL,
                         ts TIMESTAMP NOT NULL,
-                        user_id VARCHAR(20) NOT NULL,
+                        message_user_id VARCHAR(20) NOT NULL,
                         reaction_name VARCHAR(20) NOT NULL,
                         reaction_count INTEGER,
-                        reaction_user VARCHAR(20),
-                        PRIMARY KEY(channel_id, ts, reaction_name, reaction_user)
+                        reaction_user_id VARCHAR(20),
+                        PRIMARY KEY(channel_id, ts, reaction_name, reaction_user_id)
+                    );
+                """)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS slack_channels (
+                        channel_id VARCHAR(20) NOT NULL,
+                        channel_name VARCHAR(20) NOT NULL,
+                        PRIMARY KEY(channel_id)
                     );
                 """)
                 self.conn.commit()
@@ -148,7 +154,7 @@ class Db:
 
         try:
             with self.conn.cursor() as cursor:
-                query = f"INSERT INTO slack_messages (channel_id, channel_name, ts, user_id, text, thread_ts, reply_count) VALUES %s ON CONFLICT DO NOTHING;"
+                query = f"INSERT INTO slack_messages (channel_id, ts, user_id, text, thread_ts, reply_count) VALUES %s ON CONFLICT DO NOTHING;"
                 extras.execute_values(cursor, query, messages)
                 self.conn.commit()
         except psycopg2.Error as e:
@@ -163,8 +169,24 @@ class Db:
 
         try:
             with self.conn.cursor() as cursor:
-                query = f"INSERT INTO slack_reactions (channel_id, channel_name, ts, user_id, reaction_name, reaction_count, reaction_user) VALUES %s ON CONFLICT DO NOTHING;"
+                query = f"INSERT INTO slack_reactions (channel_id, ts, message_user_id, reaction_name, reaction_count, reaction_user_id) VALUES %s ON CONFLICT DO NOTHING;"
                 extras.execute_values(cursor, query, reactions)
+                self.conn.commit()
+        except psycopg2.Error as e:
+            print(f"Failed to insert data: {e}")
+            self.conn.rollback()
+            raise e
+
+    def insert_channel_data(self, channels):
+        if len(channels) == 0 :
+            print("Skip registration because channels have no data.")
+            return
+
+        try:
+            with self.conn.cursor() as cursor:
+                # 新規channel又はchannel_nameが変更された場合のみ更新を行う
+                query = f"INSERT INTO slack_channels (channel_id, channel_name) VALUES %s ON CONFLICT (channel_id) DO UPDATE SET channel_name = excluded.channel_name WHERE slack_channels.channel_name <> excluded.channel_name;"
+                extras.execute_values(cursor, query, channels)
                 self.conn.commit()
         except psycopg2.Error as e:
             print(f"Failed to insert data: {e}")
@@ -261,6 +283,7 @@ class SlackBot:
 
         channels = self.get_channels()
         message_data = {}
+        channel_list = []
 
         for channel in channels:
             is_archived = channel["is_archived"]
@@ -268,14 +291,16 @@ class SlackBot:
                 continue
             self.process_channel(channel, start_timestamp, end_timestamp, message_data)
 
-        return message_data
+            channel_list.append(Channel(channel["id"], channel["name"]))
+
+        return message_data, channel_list
 
     def export_data_to_database(self, start_time, end_time):
-        message_data = self.create_messages_and_reactions(start_time, end_time)
-        write_channel_data_for_database(message_data)
+        message_data, channel_list = self.create_messages_and_reactions(start_time, end_time)
+        write_channel_data_for_database(message_data, channel_list)
 
     def export_data_to_csv(self, start_time, end_time):
-        message_data = self.create_messages_and_reactions(start_time, end_time)
+        message_data, _ = self.create_messages_and_reactions(start_time, end_time)
         write_channel_data_for_csv(start_time, end_time, message_data)
 
 
