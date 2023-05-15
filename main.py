@@ -124,7 +124,7 @@ class Db:
                         text VARCHAR,
                         thread_ts TIMESTAMP,
                         reply_count INTEGER,
-                        PRIMARY KEY(channel_id, ts, user_id, text)
+                        PRIMARY KEY(channel_id, ts)
                     );
                 """)
                 cursor.execute("""
