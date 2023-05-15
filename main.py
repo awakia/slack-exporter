@@ -9,7 +9,9 @@ from typing import Optional
 import psycopg2
 from psycopg2 import extras
 from dataclasses import dataclass, field
+import sys
 
+import pytz
 from dotenv import load_dotenv
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
@@ -33,8 +35,34 @@ class Message:
     reply_count: int = 0
     reactions: list[Reaction] = field(default_factory=list)
 
+def write_csv(data, filename):
+    with open(filename, mode="a", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        for row in data:
+            writer.writerow(row)
 
-def write_channel_data(message_data):
+
+def write_channel_data_for_csv(start_time, end_time, message_data):
+    jst = pytz.timezone('Asia/Tokyo')
+    start = jst.localize(start_time)
+    end = jst.localize(end_time)
+    timestr = start.strftime('%Y%m%d%H%M%S') + '-' + end.strftime('%Y%m%d%H%M%S')
+    messages_csv = f"slack_messages_{timestr}.csv"
+    reactions_csv = f"slack_reactions_{timestr}.csv"
+
+    messages = [["channel_id", "channel_name", "ts", "user", "text", "thread_ts", "reply_count"]]
+    reactions = [["channel_id", "channel_name", "ts", "user", "reaction_name", "reaction_count", "reaction_user"]]
+
+    for _, m in message_data.items():
+        messages.append([m.channel_id, m.channel_name, m.ts, m.user, m.text, m.thread_ts, m.reply_count])
+        for r in m.reactions:
+            for u in r.users:
+                reactions.append([m.channel_id, m.channel_name, m.ts, m.user, r.name, r.count, u])
+
+    write_csv(messages, messages_csv)
+    write_csv(reactions, reactions_csv)
+
+def write_channel_data_for_database(message_data):
     messages = []
     reactions = []
 
@@ -242,9 +270,13 @@ class SlackBot:
 
         return message_data
 
-    def export_data_worker(self, start_time, end_time):
+    def export_data_to_database(self, start_time, end_time):
         message_data = self.create_messages_and_reactions(start_time, end_time)
-        write_channel_data(message_data)
+        write_channel_data_for_database(message_data)
+
+    def export_data_to_csv(self, start_time, end_time):
+        message_data = self.create_messages_and_reactions(start_time, end_time)
+        write_channel_data_for_csv(start_time, end_time, message_data)
 
 
 # Message data sample
@@ -274,10 +306,20 @@ class SlackBot:
 """
 
 if __name__ == "__main__":
-    bot = SlackBot()
+    if len(sys.argv) != 2:
+        print("Please specify an argument for the output type. ")
+        sys.exit(1)
 
     start_time = datetime.datetime(2000, 1, 1)
     # start_time = datetime.datetime(2023, 5, 1)
     end_time = datetime.datetime.now()
 
-    bot.export_data_worker(start_time, end_time)
+    bot = SlackBot()
+    output_type = sys.argv[1]
+    if output_type == "csv":
+        bot.export_data_to_csv(start_time, end_time)
+    elif output_type == "db":
+        bot.export_data_to_database(start_time, end_time)
+    else:
+        print("Invalid output type. Please specify 'csv' or 'db'.")
+        sys.exit(1)
