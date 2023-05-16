@@ -16,6 +16,12 @@ from dotenv import load_dotenv
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
 
+from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
+
+Base = declarative_base()
+
 
 @dataclass
 class Reaction:
@@ -35,10 +41,50 @@ class Message:
     reply_count: int = 0
     reactions: list[Reaction] = field(default_factory=list)
 
-@dataclass
-class Channel:
-    channel_id: str
-    channel_name: str
+# for database register
+class SlackMessages(Base):
+    __tablename__ = 'slack_messages'
+    channel_id = Column(String(20), primary_key=True)
+    ts = Column(DateTime, primary_key=True)
+    user_id = Column(String(20), nullable=False)
+    text = Column(String)
+    thread_ts = Column(DateTime)
+    reply_count = Column(Integer)
+
+    def __init__(self, channel_id: str, ts: datetime, user_id: str, text: str, thread_ts: datetime, reply_count: int):
+        self.channel_id = channel_id
+        self.ts = ts
+        self.user_id = user_id
+        self.text = text
+        self.thread_ts = thread_ts
+        self.reply_count = reply_count
+
+class SlackReactions(Base):
+    __tablename__ = 'slack_reactions'
+    channel_id = Column(String(20), primary_key=True)
+    ts = Column(DateTime, primary_key=True)
+    message_user_id = Column(String(20), nullable=False)
+    reaction_name = Column(String(20), primary_key=True)
+    reaction_count = Column(Integer)
+    reaction_user_id = Column(String(20), primary_key=True)
+
+    def __init__(self, channel_id: str, ts: datetime, message_user_id: str, reaction_name: str, reaction_count: int, reaction_user_id: str):
+        self.channel_id = channel_id
+        self.ts = ts
+        self.message_user_id = message_user_id
+        self.reaction_name = reaction_name
+        self.reaction_count = reaction_count
+        self.reaction_user_id = reaction_user_id
+
+class SlackChannels(Base):
+    __tablename__ = 'slack_channels'
+    channel_id = Column(String(20), primary_key=True)
+    channel_name = Column(String(80), nullable=False)
+
+    def __init__(self, channel_id: str, channel_name: str):
+        self.channel_id = channel_id
+        self.channel_name = channel_name
+
 
 def write_csv(data, filename):
     with open(filename, mode="a", encoding="utf-8", newline="") as f:
@@ -72,15 +118,27 @@ def write_channel_data_for_database(message_data, channel_list):
     reactions = []
 
     for _, m in message_data.items():
-        messages.append([m.channel_id, m.ts, m.user, m.text, m.thread_ts, m.reply_count])
+        messages.append({
+            "channel_id": m.channel_id,
+            "ts": m.ts,
+            "user_id": m.user,
+            "text": m.text,
+            "thread_ts": m.thread_ts,
+            "reply_count": m.reply_count
+        })
         for r in m.reactions:
             for u in r.users:
-                reactions.append([m.channel_id, m.ts, m.user, r.name, r.count, u])
-
-    channels = [[channel.channel_id, channel.channel_name] for channel in channel_list]
+                reactions.append({
+                    "channel_id": m.channel_id,
+                    "ts": m.ts,
+                    "message_user_id": m.user,
+                    "reaction_name": r.name,
+                    "reaction_count": r.count,
+                    "reaction_user_id": u
+                })
 
     db = Db()
-    db.insert_channel_data(channels)
+    db.insert_channel_data(channel_list)
     db.insert_message_data(messages)
     db.insert_reaction_data(reactions)
 
@@ -109,88 +167,51 @@ def process_message(message, channel_id, channel_name, message_data):
 class Db:
     def __init__(self):
         try:
-            self.conn = psycopg2.connect(os.environ.get("DATABASE_URL"))
-        except psycopg2.Error as e:
+            engine = create_engine(os.environ.get("DATABASE_URL"))
+            Session = sessionmaker(bind=engine)
+            self.session = Session()
+        except Exception as e:
             print(f"Failed to connect to database: {e}")
             raise e
         else:
-            with self.conn.cursor() as cursor:
-                cursor.execute("set local timezone to 'Asia/Tokyo';")
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS slack_messages (
-                        channel_id VARCHAR(20) NOT NULL,
-                        ts TIMESTAMP NOT NULL,
-                        user_id VARCHAR(20) NOT NULL,
-                        text VARCHAR,
-                        thread_ts TIMESTAMP,
-                        reply_count INTEGER,
-                        PRIMARY KEY(channel_id, ts)
-                    );
-                """)
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS slack_reactions (
-                        channel_id VARCHAR(20) NOT NULL,
-                        ts TIMESTAMP NOT NULL,
-                        message_user_id VARCHAR(20) NOT NULL,
-                        reaction_name VARCHAR(20) NOT NULL,
-                        reaction_count INTEGER,
-                        reaction_user_id VARCHAR(20),
-                        PRIMARY KEY(channel_id, ts, reaction_name, reaction_user_id)
-                    );
-                """)
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS slack_channels (
-                        channel_id VARCHAR(20) NOT NULL,
-                        channel_name VARCHAR(20) NOT NULL,
-                        PRIMARY KEY(channel_id)
-                    );
-                """)
-                self.conn.commit()
+            Base.metadata.create_all(engine)
 
     def insert_message_data(self, messages):
-        if len(messages) == 0 :
+        if len(messages) == 0:
             print("Skip registration because reactions have no data.")
             return
-
         try:
-            with self.conn.cursor() as cursor:
-                query = f"INSERT INTO slack_messages (channel_id, ts, user_id, text, thread_ts, reply_count) VALUES %s ON CONFLICT DO NOTHING;"
-                extras.execute_values(cursor, query, messages)
-                self.conn.commit()
-        except psycopg2.Error as e:
+            self.session.bulk_insert_mappings(SlackMessages, messages, render_nulls=True)
+            self.session.commit()
+        except Exception as e:
             print(f"Failed to insert data: {e}")
-            self.conn.rollback()
+            self.session.rollback()
             raise e
 
     def insert_reaction_data(self, reactions):
-        if len(reactions) == 0 :
+        if len(reactions) == 0:
             print("Skip registration because reactions have no data.")
             return
-
         try:
-            with self.conn.cursor() as cursor:
-                query = f"INSERT INTO slack_reactions (channel_id, ts, message_user_id, reaction_name, reaction_count, reaction_user_id) VALUES %s ON CONFLICT DO NOTHING;"
-                extras.execute_values(cursor, query, reactions)
-                self.conn.commit()
-        except psycopg2.Error as e:
+            self.session.bulk_insert_mappings(SlackReactions, reactions, render_nulls=True)
+            self.session.commit()
+        except Exception as e:
             print(f"Failed to insert data: {e}")
-            self.conn.rollback()
+            self.session.rollback()
             raise e
 
     def insert_channel_data(self, channels):
-        if len(channels) == 0 :
+        if len(channels) == 0:
             print("Skip registration because channels have no data.")
             return
-
         try:
-            with self.conn.cursor() as cursor:
-                # 新規channel又はchannel_nameが変更された場合のみ更新を行う
-                query = f"INSERT INTO slack_channels (channel_id, channel_name) VALUES %s ON CONFLICT (channel_id) DO UPDATE SET channel_name = excluded.channel_name WHERE slack_channels.channel_name <> excluded.channel_name;"
-                extras.execute_values(cursor, query, channels)
-                self.conn.commit()
-        except psycopg2.Error as e:
+            # 新規channel又はchannel_nameが変更された場合のみ更新を行う
+            for channel in channels:
+                self.session.merge(channel)
+            self.session.commit()
+        except Exception as e:
             print(f"Failed to insert data: {e}")
-            self.conn.rollback()
+            self.session.rollback()
             raise e
 
 class SlackBot:
@@ -291,7 +312,7 @@ class SlackBot:
                 continue
             self.process_channel(channel, start_timestamp, end_timestamp, message_data)
 
-            channel_list.append(Channel(channel["id"], channel["name"]))
+            channel_list.append(SlackChannels(channel["id"], channel["name"]))
 
         return message_data, channel_list
 
