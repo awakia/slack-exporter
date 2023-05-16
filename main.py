@@ -9,7 +9,7 @@ from typing import Optional
 import psycopg2
 from psycopg2 import extras
 from dataclasses import dataclass, field
-import sys
+import argparse
 
 import pytz
 from dotenv import load_dotenv
@@ -331,20 +331,19 @@ class SlackBot:
 """
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Please specify an argument for the output type. ")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Export data from SlackBot.")
+    parser.add_argument("output_type", choices=["csv", "db"], help="Output type: 'csv' or 'db'")
+    args = parser.parse_args()
 
     start_time = datetime.datetime(2000, 1, 1)
     # start_time = datetime.datetime(2023, 5, 1)
     end_time = datetime.datetime.now()
 
     bot = SlackBot()
-    output_type = sys.argv[1]
+    output_type = args.output_type
     if output_type == "csv":
         bot.export_data_to_csv(start_time, end_time)
     elif output_type == "db":
         bot.export_data_to_database(start_time, end_time)
     else:
-        print("Invalid output type. Please specify 'csv' or 'db'.")
-        sys.exit(1)
+        parser.error("Invalid output type. Please specify 'csv' or 'db'.")
