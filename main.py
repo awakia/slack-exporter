@@ -6,8 +6,6 @@ import datetime
 import os
 import time
 from typing import Optional
-import psycopg2
-from psycopg2 import extras
 from dataclasses import dataclass, field
 import argparse
 
