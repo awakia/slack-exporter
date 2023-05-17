@@ -5,12 +5,20 @@ import csv
 import datetime
 import os
 import time
-from dataclasses import dataclass
+from typing import Optional
+from dataclasses import dataclass, field
+import argparse
 
 import pytz
 from dotenv import load_dotenv
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
+
+from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
+
+Base = declarative_base()
 
 
 @dataclass
@@ -24,12 +32,56 @@ class Reaction:
 class Message:
     channel_id: str
     channel_name: str
-    ts: str
+    ts: datetime.datetime
     user: str
     text: str
-    thread_ts: str
-    reply_count: int
-    reactions: list[Reaction]
+    thread_ts: Optional[datetime.datetime] = None
+    reply_count: int = 0
+    reactions: list[Reaction] = field(default_factory=list)
+
+# for database register
+class SlackMessages(Base):
+    __tablename__ = 'slack_messages'
+    channel_id = Column(String(20), primary_key=True)
+    ts = Column(DateTime, primary_key=True)
+    user_id = Column(String(20), nullable=False)
+    text = Column(String)
+    thread_ts = Column(DateTime)
+    reply_count = Column(Integer)
+
+    def __init__(self, channel_id: str, ts: datetime, user_id: str, text: str, thread_ts: datetime, reply_count: int):
+        self.channel_id = channel_id
+        self.ts = ts
+        self.user_id = user_id
+        self.text = text
+        self.thread_ts = thread_ts
+        self.reply_count = reply_count
+
+class SlackReactions(Base):
+    __tablename__ = 'slack_reactions'
+    channel_id = Column(String(20), primary_key=True)
+    ts = Column(DateTime, primary_key=True)
+    message_user_id = Column(String(20), nullable=False)
+    reaction_name = Column(String(20), primary_key=True)
+    reaction_count = Column(Integer)
+    reaction_user_id = Column(String(20), primary_key=True)
+
+    def __init__(self, channel_id: str, ts: datetime, message_user_id: str, reaction_name: str, reaction_count: int, reaction_user_id: str):
+        self.channel_id = channel_id
+        self.ts = ts
+        self.message_user_id = message_user_id
+        self.reaction_name = reaction_name
+        self.reaction_count = reaction_count
+        self.reaction_user_id = reaction_user_id
+
+class SlackChannels(Base):
+    __tablename__ = 'slack_channels'
+    channel_id = Column(String(20), primary_key=True)
+    channel_name = Column(String(80), nullable=False)
+
+    def __init__(self, channel_id: str, channel_name: str):
+        self.channel_id = channel_id
+        self.channel_name = channel_name
 
 
 def write_csv(data, filename):
@@ -39,7 +91,7 @@ def write_csv(data, filename):
             writer.writerow(row)
 
 
-def write_channel_data(start_time, end_time, message_data):
+def write_channel_data_for_csv(start_time, end_time, message_data):
     jst = pytz.timezone('Asia/Tokyo')
     start = jst.localize(start_time)
     end = jst.localize(end_time)
@@ -59,12 +111,45 @@ def write_channel_data(start_time, end_time, message_data):
     write_csv(messages, messages_csv)
     write_csv(reactions, reactions_csv)
 
+def write_channel_data_for_database(message_data, channel_list):
+    messages = []
+    reactions = []
+
+    for _, m in message_data.items():
+        messages.append({
+            "channel_id": m.channel_id,
+            "ts": m.ts,
+            "user_id": m.user,
+            "text": m.text,
+            "thread_ts": m.thread_ts,
+            "reply_count": m.reply_count
+        })
+        for r in m.reactions:
+            for u in r.users:
+                reactions.append({
+                    "channel_id": m.channel_id,
+                    "ts": m.ts,
+                    "message_user_id": m.user,
+                    "reaction_name": r.name,
+                    "reaction_count": r.count,
+                    "reaction_user_id": u
+                })
+
+    db = Db()
+    db.insert_channel_data(channel_list)
+    db.insert_message_data(messages)
+    db.insert_reaction_data(reactions)
 
 def process_message(message, channel_id, channel_name, message_data):
-    ts = message.get("ts", "")
+    ts = datetime.datetime.fromtimestamp(float(message.get("ts", "")))
     user = message.get("user", "")
     text = message.get("text", "")
     thread_ts = message.get("thread_ts", "")
+    # スレッドがない場合、thread_tsをNULLで登録する
+    if thread_ts == "":
+        thread_ts = None
+    else:
+        thread_ts = datetime.datetime.fromtimestamp(float(thread_ts))
     reply_count = message.get("reply_count", 0)
 
     reactions = []
@@ -73,9 +158,59 @@ def process_message(message, channel_id, channel_name, message_data):
             reaction_users = reaction.get("users", [])
             reactions.append(Reaction(reaction["name"], reaction["count"], reaction_users))
 
-    message_data[(channel_id, ts)] = Message(
-        channel_id, channel_name, ts, user, text, thread_ts, reply_count, reactions)
+    key = (channel_id, ts)
+    if key not in message_data:
+        message_data[key] = Message(channel_id, channel_name, ts, user, text, thread_ts, reply_count, reactions)
 
+class Db:
+    def __init__(self):
+        try:
+            engine = create_engine(os.environ.get("DATABASE_URL"))
+            Session = sessionmaker(bind=engine)
+            self.session = Session()
+        except Exception as e:
+            print(f"Failed to connect to database: {e}")
+            raise e
+        else:
+            Base.metadata.create_all(engine)
+
+    def insert_message_data(self, messages):
+        if len(messages) == 0:
+            print("Skip registration because reactions have no data.")
+            return
+        try:
+            self.session.bulk_insert_mappings(SlackMessages, messages, render_nulls=True)
+            self.session.commit()
+        except Exception as e:
+            print(f"Failed to insert data: {e}")
+            self.session.rollback()
+            raise e
+
+    def insert_reaction_data(self, reactions):
+        if len(reactions) == 0:
+            print("Skip registration because reactions have no data.")
+            return
+        try:
+            self.session.bulk_insert_mappings(SlackReactions, reactions, render_nulls=True)
+            self.session.commit()
+        except Exception as e:
+            print(f"Failed to insert data: {e}")
+            self.session.rollback()
+            raise e
+
+    def insert_channel_data(self, channels):
+        if len(channels) == 0:
+            print("Skip registration because channels have no data.")
+            return
+        try:
+            # 新規channel又はchannel_nameが変更された場合のみ更新を行う
+            for channel in channels:
+                self.session.merge(channel)
+            self.session.commit()
+        except Exception as e:
+            print(f"Failed to insert data: {e}")
+            self.session.rollback()
+            raise e
 
 class SlackBot:
     def __init__(self):
@@ -167,6 +302,7 @@ class SlackBot:
 
         channels = self.get_channels()
         message_data = {}
+        channel_list = []
 
         for channel in channels:
             is_archived = channel["is_archived"]
@@ -174,11 +310,17 @@ class SlackBot:
                 continue
             self.process_channel(channel, start_timestamp, end_timestamp, message_data)
 
-        return message_data
+            channel_list.append(SlackChannels(channel["id"], channel["name"]))
+
+        return message_data, channel_list
+
+    def export_data_to_database(self, start_time, end_time):
+        message_data, channel_list = self.create_messages_and_reactions(start_time, end_time)
+        write_channel_data_for_database(message_data, channel_list)
 
     def export_data_to_csv(self, start_time, end_time):
-        message_data = self.create_messages_and_reactions(start_time, end_time)
-        write_channel_data(start_time, end_time, message_data)
+        message_data, _ = self.create_messages_and_reactions(start_time, end_time)
+        write_channel_data_for_csv(start_time, end_time, message_data)
 
 
 # Message data sample
@@ -208,10 +350,19 @@ class SlackBot:
 """
 
 if __name__ == "__main__":
-    bot = SlackBot()
+    parser = argparse.ArgumentParser(description="Export data from SlackBot.")
+    parser.add_argument("output_type", choices=["csv", "db"], help="Output type: 'csv' or 'db'")
+    args = parser.parse_args()
 
     start_time = datetime.datetime(2000, 1, 1)
     # start_time = datetime.datetime(2023, 5, 1)
     end_time = datetime.datetime.now()
 
-    bot.export_data_to_csv(start_time, end_time)
+    bot = SlackBot()
+    output_type = args.output_type
+    if output_type == "csv":
+        bot.export_data_to_csv(start_time, end_time)
+    elif output_type == "db":
+        bot.export_data_to_database(start_time, end_time)
+    else:
+        parser.error("Invalid output type. Please specify 'csv' or 'db'.")
