@@ -16,6 +16,7 @@ from slack_sdk.errors import SlackApiError
 
 from sqlalchemy import Column, Integer, String, DateTime
 from sqlalchemy import create_engine
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker, declarative_base
 
 Base = declarative_base()
@@ -179,10 +180,20 @@ class Db:
             print("Skip registration because reactions have no data.")
             return
         try:
-            self.session.bulk_insert_mappings(SlackMessages, messages, render_nulls=True)
+            for message in messages:
+                primary_key = (message['channel_id'], message['ts'])
+                existing_message = self.session.get(SlackMessages, primary_key)
+                if existing_message:
+                    existing_message.user_id = message['user_id']
+                    existing_message.text = message['text']
+                    existing_message.thread_ts = message['thread_ts']
+                    existing_message.reply_count = message['reply_count']
+                else:
+                    new_message = SlackMessages(**message)
+                    self.session.add(new_message)
             self.session.commit()
-        except Exception as e:
-            print(f"Failed to insert data: {e}")
+        except SQLAlchemyError as e:
+            print(f"Failed to insert or update data: {e}")
             self.session.rollback()
             raise e
 
@@ -191,10 +202,17 @@ class Db:
             print("Skip registration because reactions have no data.")
             return
         try:
-            self.session.bulk_insert_mappings(SlackReactions, reactions, render_nulls=True)
+            for reaction in reactions:
+                primary_key = (reaction['channel_id'], reaction['ts'], reaction['reaction_name'], reaction['reaction_user_id'])
+                existing_reaction = self.session.get(SlackReactions, primary_key)
+                if existing_reaction:
+                    existing_reaction.reaction_count = reaction['reaction_count']
+                else:
+                    new_reaction = SlackReactions(**reaction)
+                    self.session.add(new_reaction)
             self.session.commit()
-        except Exception as e:
-            print(f"Failed to insert data: {e}")
+        except SQLAlchemyError as e:
+            print(f"Failed to insert or update data: {e}")
             self.session.rollback()
             raise e
 
@@ -203,12 +221,21 @@ class Db:
             print("Skip registration because channels have no data.")
             return
         try:
-            # 新規channel又はchannel_nameが変更された場合のみ更新を行う
             for channel in channels:
-                self.session.merge(channel)
+                channel_dict = {
+                    'channel_id': channel.channel_id,
+                    'channel_name': channel.channel_name
+                }
+                primary_key = channel_dict['channel_id']
+                existing_channel = self.session.get(SlackChannels, primary_key)
+                if existing_channel:
+                    existing_channel.channel_name = channel_dict['channel_name']
+                else:
+                    new_channel = SlackChannels(**channel_dict)
+                    self.session.add(new_channel)
             self.session.commit()
-        except Exception as e:
-            print(f"Failed to insert data: {e}")
+        except SQLAlchemyError as e:
+            print(f"Failed to insert or update data: {e}")
             self.session.rollback()
             raise e
 
