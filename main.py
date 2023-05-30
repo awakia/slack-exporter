@@ -63,7 +63,7 @@ class SlackReactions(Base):
     channel_id = Column(String(20), primary_key=True)
     ts = Column(DateTime, primary_key=True)
     message_user_id = Column(String(20), nullable=False)
-    reaction_name = Column(String(20), primary_key=True)
+    reaction_name = Column(String(80), primary_key=True)
     reaction_count = Column(Integer)
     reaction_user_id = Column(String(20), primary_key=True)
 
