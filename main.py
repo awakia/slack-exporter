@@ -21,6 +21,7 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 
 Base = declarative_base()
 
+JST_TIMEZONE = pytz.timezone('Asia/Tokyo')
 
 @dataclass
 class Reaction:
@@ -93,9 +94,8 @@ def write_csv(data, filename):
 
 
 def write_channel_data_for_csv(start_time, end_time, message_data):
-    jst = pytz.timezone('Asia/Tokyo')
-    start = jst.localize(start_time)
-    end = jst.localize(end_time)
+    start = JST_TIMEZONE.localize(start_time)
+    end = JST_TIMEZONE.localize(end_time)
     timestr = start.strftime('%Y%m%d%H%M%S') + '-' + end.strftime('%Y%m%d%H%M%S')
     messages_csv = f"slack_messages_{timestr}.csv"
     reactions_csv = f"slack_reactions_{timestr}.csv"
@@ -142,7 +142,7 @@ def write_channel_data_for_database(message_data, channel_list):
     db.insert_reaction_data(reactions)
 
 def process_message(message, channel_id, channel_name, message_data):
-    ts = datetime.datetime.fromtimestamp(float(message.get("ts", "")))
+    ts = datetime.datetime.fromtimestamp(float(message.get("ts", ""))).astimezone(JST_TIMEZONE)
     user = message.get("user", "")
     text = message.get("text", "")
     thread_ts = message.get("thread_ts", "")
@@ -150,7 +150,7 @@ def process_message(message, channel_id, channel_name, message_data):
     if thread_ts == "":
         thread_ts = None
     else:
-        thread_ts = datetime.datetime.fromtimestamp(float(thread_ts))
+        thread_ts = datetime.datetime.fromtimestamp(float(thread_ts)).astimezone(JST_TIMEZONE)
     reply_count = message.get("reply_count", 0)
 
     reactions = []
@@ -324,8 +324,8 @@ class SlackBot:
                     process_message(reply, channel_id, channel_name, message_data)
 
     def create_messages_and_reactions(self, start_time, end_time):
-        start_timestamp = time.mktime(start_time.timetuple())
-        end_timestamp = time.mktime(end_time.timetuple())
+        start_timestamp = JST_TIMEZONE.localize(start_time).timestamp()
+        end_timestamp = JST_TIMEZONE.localize(end_time).timestamp()
 
         channels = self.get_channels()
         message_data = {}
