@@ -84,6 +84,10 @@ class SlackChannels(Base):
         self.channel_id = channel_id
         self.channel_name = channel_name
 
+def calc_execution_time():
+    start_time = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) - datetime.timedelta(days=2)
+    end_time = datetime.datetime.now().replace(hour=23, minute=59, second=59, microsecond=999999) - datetime.timedelta(days=1)
+    return start_time, end_time
 
 def write_csv(data, filename):
     with open(filename, mode="a", encoding="utf-8", newline="") as f:
@@ -381,9 +385,7 @@ if __name__ == "__main__":
     parser.add_argument("output_type", choices=["csv", "db"], help="Output type: 'csv' or 'db'")
     args = parser.parse_args()
 
-    start_time = datetime.datetime(2000, 1, 1)
-    # start_time = datetime.datetime(2023, 5, 1)
-    end_time = datetime.datetime.now()
+    start_time, end_time = calc_execution_time()
 
     bot = SlackBot()
     output_type = args.output_type
