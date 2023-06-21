@@ -7,10 +7,13 @@ readme = "README.md"
 packages = [{include = "slack_exporter"}]
 
 [tool.poetry.dependencies]
-python = "^3.11"
+python = "3.9.13"
 python-dotenv = "^0.21.1"
 slack-bolt = "^1.16.2"
 pytz = "^2023.3"
+slack-sdk = "^3.21.3"
+sqlalchemy = "^2.0.15"
+psycopg2 = "^2.9.6"
 
 
 [tool.poetry.group.dev.dependencies]
