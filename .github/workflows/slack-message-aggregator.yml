@@ -38,12 +38,8 @@ jobs:
         run: |
           curl -sSL https://install.python-poetry.org | python3 -
           echo "$HOME/.poetry/bin" >> $GITHUB_PATH
-      - name: Poetry Version
-        run: |
-          poetry --version
       - name: Poetry Install Dependencies
         run: |
-          echo $GITHUB_PATH
           poetry install --no-interaction
 
       - name: Run Script
