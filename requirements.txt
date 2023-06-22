@@ -1,5 +1,0 @@
-pytz
-python-dotenv
-slack_sdk
-psycopg2
-sqlalchemy
